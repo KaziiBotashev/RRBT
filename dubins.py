@@ -226,7 +226,7 @@ def connect(start, end, dt, radius, plot = False):
                          [0,               dt]])
     
     dubins = DubinsPath(start, end, radius)
-    print(start, end)
+#     print(start, end)
     dubins.calc_paths()
     path, _ = dubins.get_shortest_path()
     xs, ys, V, omegas = DubinsPath.gen_path(start, path, radius, dt)
@@ -237,7 +237,6 @@ def connect(start, end, dt, radius, plot = False):
         for i in range(3):
             plt.scatter(xs[i], ys[i])
         plt.axis("equal")
-        plt.show()
     del xs[0][-1]
     del xs[1][-1]
     del ys[0][-1]
@@ -252,14 +251,16 @@ def connect(start, end, dt, radius, plot = False):
         elif path_type[0] == 'r':
             for item in x:
                 v.append(1)
-                w.append(-1)
+                w.append(-1/radius)
         elif path_type[0] == 'l':
             for item in x:
                 v.append(1)
-                w.append(1)
+                w.append(1/radius)
     Vs = np.array([v,w]).T
     result =[np.array(start)]
     for vel in Vs:
         result.append(result[-1]+B_matrix(result[-1][2], dt)@vel)
     result = np.array(result)
+    plt.plot(result[:,0], result[:,1])
+    plt.show()
     return result, Vs
