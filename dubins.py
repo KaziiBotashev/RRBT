@@ -1,0 +1,265 @@
+import math
+from copy import deepcopy
+import numpy as np
+import matplotlib.pyplot as plt
+
+def draw_point(point, arrow_length=0.5):
+    plt.plot(point[0], point[1], 'o')
+    plt.arrow(point[0], point[1], arrow_length * math.cos(point[2]), arrow_length * math.sin(point[2]), head_width=0.05)
+    
+def flatten_list(list_):
+    merged_list = []
+    for sublist in list_:
+        for item in sublist:
+            merged_list.append(item)
+    return np.array(merged_list)
+
+class DubinsPath(object):
+    def __init__(self, start, end, r=1.0):
+        self._s = start
+        self._e = end
+        self._r = r
+        self._paths = []
+
+    def calc_paths(self):
+        le = self.calc_end()
+        types = [self.calc_lsl_from_origin,
+                 self.calc_rsr_from_origin,
+                 self.calc_lsr_from_origin,
+                 self.calc_rsl_from_origin,
+                 self.calc_rlr_from_origin,
+                 self.calc_lrl_from_origin]
+        for t in types:
+            path = t(le)
+            if path:
+                self._paths.append(path)
+        return self._paths
+
+    def get_shortest_path(self):
+        shortest_cost = float("inf")
+        shortest_path = []
+        for path in self._paths:
+            cost = 0
+            for p in path:
+                cost += p[1] if p[0] == 's' else p[1] * self._r
+            if cost < shortest_cost:
+                shortest_path = path
+                shortest_cost = cost
+        return deepcopy(shortest_path), shortest_cost
+
+    def calc_end(self):
+        ex = self._e[0] - self._s[0]
+        ey = self._e[1] - self._s[1]
+
+        lex = math.cos(self._s[2]) * ex + math.sin(self._s[2]) * ey
+        ley = - math.sin(self._s[2]) * ex + math.cos(self._s[2]) * ey
+        leyaw = self._e[2] - self._s[2]
+        lex = lex / self._r
+        ley = ley / self._r
+        return [lex, ley, leyaw]
+
+    def mod2pi(self, theta):
+        return theta - 2.0 * math.pi * math.floor(theta / 2.0 / math.pi)
+
+    def calc_lsl_from_origin(self, e):
+        x_ = e[0] - math.sin(e[2])
+        y_ = e[1] - 1 + math.cos(e[2])
+
+        u = math.sqrt((x_) ** 2 + (y_) ** 2)
+        t = self.mod2pi(math.atan2(y_ , x_))
+        v = self.mod2pi(e[2] - t)
+        return [['l', t], ['s', u * self._r], ['l', v]]
+
+    def calc_rsr_from_origin(self, e):
+        e_ = deepcopy(e)
+        e_[1] = -e_[1]
+        e_[2] = self.mod2pi(-e_[2])
+
+        path = self.calc_lsl_from_origin(e_)
+        path[0][0] = 'r'
+        path[2][0] = 'r'
+        return path
+
+    def calc_lsr_from_origin(self, e):
+        x_ = e[0] + math.sin(e[2])
+        y_ = e[1] - 1 - math.cos(e[2])
+        u1_square = x_ ** 2 + y_ ** 2
+        if u1_square < 4:
+            return []
+        t1 = self.mod2pi(math.atan2(y_, x_))
+        u = math.sqrt(u1_square - 4)
+        theta = self.mod2pi(math.atan(2 / u))
+        t = self.mod2pi(t1 + theta)
+        v = self.mod2pi(t - e[2])
+        return [['l', t], ['s', u * self._r], ['r', v]]
+
+    def calc_rsl_from_origin(self, e):
+        e_ = deepcopy(e)
+        e_[1] = -e_[1]
+        e_[2] = self.mod2pi(-e_[2])
+
+        path = self.calc_lsr_from_origin(e_)
+        if path:
+            path[0][0] = 'r'
+            path[2][0] = 'l'
+            return path
+        else:
+            return []
+
+    def calc_lrl_from_origin(self, e):
+        x_ = e[0] - math.sin(e[2])
+        y_ = e[1] - 1 + math.cos(e[2])
+        u1 = math.sqrt(x_ ** 2 + y_ ** 2)
+        if u1 > 4:
+            return []
+        t1 = math.atan2(y_, x_)
+        theta = math.acos(u1 / 4)
+        t = self.mod2pi(math.pi / 2 + t1 + theta)
+        u = self.mod2pi(math.pi + 2 * theta)
+        v = self.mod2pi(math.pi / 2 - t1 + theta + e[2])
+        return [['l', t], ['r', u], ['l', v]]
+
+    def calc_rlr_from_origin(self, e):
+        e_ = deepcopy(e)
+        e_[1] = -e_[1]
+        e_[2] = self.mod2pi(-e_[2])
+
+        path = self.calc_lrl_from_origin(e_)
+        if path:
+            path[0][0] = 'r'
+            path[1][0] = 'l'
+            path[2][0] = 'r'
+            return path
+        else:
+            return []
+
+    @classmethod
+    def gen_path(cls, s, path, r, dt, section=True):
+        def wrap_angle(angle):
+            """
+            Wraps the given angle to the range [-pi, +pi].
+
+            :param angle: The angle (in rad) to wrap (can be unbounded).
+            :return: The wrapped angle (guaranteed to in [-pi, +pi]).
+            """
+
+            pi2 = 2 * np.pi
+
+            while angle < -np.pi:
+                angle += pi2
+
+            while angle >= np.pi:
+                angle -= pi2
+
+            return angle
+        
+        def calc_TurnCenter(point, dir='l', r=1.0):
+            if dir == 'l':
+                ang = point[2] + math.pi / 2
+            elif dir == 'r':
+                ang = point[2] - math.pi / 2
+            else:
+                return None
+            x = point[0] + math.cos(ang) * r
+            y = point[1] + math.sin(ang) * r
+            return (x, y)
+        r_x = []
+        r_y = []
+        ps_x = []
+        ps_y = []
+        start = s
+        yaw = s[2]
+        thetas = []
+        V = []
+        omegas = []
+        for p in path:
+            if p[0] == 's':
+                for l in np.arange(0, p[1], dt):
+                    ps_x.append(start[0] + math.cos(yaw) * l)
+                    ps_y.append(start[1] + math.sin(yaw) * l)
+                    V.append(1)
+                    omegas.append(0)
+                V.append(1)
+                omegas.append(0)   
+                ps_x.append(start[0] + math.cos(yaw) * p[1])
+                ps_y.append(start[1] + math.sin(yaw) * p[1])
+                if section:
+                    r_x.append(ps_x)
+                    r_y.append(ps_y)
+                else:
+                    r_x += ps_x
+                    r_y += ps_y
+            else:
+                center = calc_TurnCenter(start, p[0], r)
+                ang_start = math.atan2(start[1] - center[1], start[0] - center[0])
+                ang_end = ang_start + p[1] if p[0] == 'l' else ang_start - p[1]
+                if p[0] == 'l':
+                    step = dt / r
+                else:
+                    step = -dt / r
+                for ang in np.arange(ang_start, ang_end, step):
+                    ps_x.append(center[0] + math.cos(ang) * r)
+                    ps_y.append(center[1] + math.sin(ang) * r)
+                    V.append(1)
+                    omegas.append(np.sign(step)*1)                    
+                V.append(1)
+                omegas.append(1*np.sign(step))   
+                ps_x.append(center[0] + math.cos(ang_end) * r)
+                ps_y.append(center[1] + math.sin(ang_end) * r)
+                if section:
+                    r_x.append(ps_x)
+                    r_y.append(ps_y)
+                else:
+                    r_x += ps_x
+                    r_y += ps_y
+                yaw = start[2] + p[1] if p[0] == 'l' else start[2] - p[1]
+            start = (ps_x[-1], ps_y[-1], yaw)
+            ps_x = []
+            ps_y = []
+        return r_x, r_y, V, omegas
+    
+def connect(start, end, dt, radius, plot = False):
+    
+    def B_matrix(theta, dt):
+        return np.array([[dt*np.cos(theta), 0],
+                         [dt*np.sin(theta), 0],
+                         [0,               dt]])
+    
+    dubins = DubinsPath(start, end, radius)
+    print(start, end)
+    dubins.calc_paths()
+    path, _ = dubins.get_shortest_path()
+    xs, ys, V, omegas = DubinsPath.gen_path(start, path, radius, dt)
+    if plot:
+        plt.figure()
+        draw_point(start)
+        draw_point(end)
+        for i in range(3):
+            plt.scatter(xs[i], ys[i])
+        plt.axis("equal")
+        plt.show()
+    del xs[0][-1]
+    del xs[1][-1]
+    del ys[0][-1]
+    del ys[1][-1]
+    v = []
+    w = []
+    for x, path_type in zip(xs, path):
+        if path_type[0] == 's':
+            for item in x:
+                v.append(1)
+                w.append(0)
+        elif path_type[0] == 'r':
+            for item in x:
+                v.append(1)
+                w.append(-1)
+        elif path_type[0] == 'l':
+            for item in x:
+                v.append(1)
+                w.append(1)
+    Vs = np.array([v,w]).T
+    result =[np.array(start)]
+    for vel in Vs:
+        result.append(result[-1]+B_matrix(result[-1][2], dt)@vel)
+    result = np.array(result)
+    return result, Vs
