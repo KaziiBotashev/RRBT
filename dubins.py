@@ -218,7 +218,7 @@ class DubinsPath(object):
             ps_y = []
         return r_x, r_y, V, omegas
     
-def connect(start, end, dt, radius, plot = False):
+def connect(start, end, radius = 1.5, dt = 0.1, plot = False):
     
     def B_matrix(theta, dt):
         return np.array([[dt*np.cos(theta), 0],
