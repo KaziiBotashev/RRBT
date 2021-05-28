@@ -88,7 +88,11 @@ class DubinsPath(object):
             return []
         t1 = self.mod2pi(math.atan2(y_, x_))
         u = math.sqrt(u1_square - 4)
-        theta = self.mod2pi(math.atan(2 / u))
+        try:
+            theta = self.mod2pi(math.atan(2 / u))
+        except:
+            u += 1e-6
+            theta = self.mod2pi(math.atan(2 / u))
         t = self.mod2pi(t1 + theta)
         v = self.mod2pi(t - e[2])
         return [['l', t], ['s', u * self._r], ['r', v]]
@@ -261,6 +265,7 @@ def connect(start, end, radius = 1.5, dt = 0.1, plot = False):
     for vel in Vs:
         result.append(result[-1]+B_matrix(result[-1][2], dt)@vel)
     result = np.array(result)
-    plt.plot(result[:,0], result[:,1])
-    plt.show()
+    if plot:
+        plt.plot(result[:,0], result[:,1])
+        plt.show()
     return result, Vs

@@ -1,22 +1,5 @@
-from nodes_edges import BeliefNode, Edge
 import numpy as np
 
-def propagate(edge, start_belief, dt):
-    Sigma = start_belief.Sigma
-    states = edge.states
-    actions = edge.actions
-    state = states[0]
-    Lambda = start_belief.Lambda
-    kalman = DynamicModel(0.1, 0.1, 0.1, dt)
-    for action in actions:
-        kalman.predict(state, action, Sigma)
-        kalman.update(Lambda)
-        state = kalman.x_updated
-        Sigma = kalman.Sigma_updated
-        Lambda = kalman.Lambda
-    return BeliefNode(Sigma, Lambda, len(actions))
-    
-    
 class DynamicModel:
     def __init__(self, q_move, q_angle, r, dt, k = 0.1):
         self.Q = np.eye(3)*q_move
@@ -48,3 +31,17 @@ class DynamicModel:
         self.Sigma_updated = self.Sigma_predicted - self.L@self.C@self.Sigma_predicted
         term = self.A-self.B(self.state)@self.K
         self.Lambda = term@Lambda_prev@term.T + self.L@self.C@self.Sigma_predicted
+        
+class Edge:
+    def __init__(self, states, actions):
+        self.states = states
+        self.actions = actions
+
+class BeliefNode:
+    def __init__(self, Sigma, Lambda, cost, parent = None, vertex = None, edge = None):
+        self.Sigma = Sigma
+        self.Lambda = Lambda
+        self.parent = parent
+        self.cost = cost
+    def __repr__(self):
+        return str((self.Sigma, self.Lambda, self.cost))
