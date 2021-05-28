@@ -31,3 +31,21 @@ def plot2dcov(mu, Sigma, color='k', nSigma=1, legend=None):
 
     plt.plot(x_y_new[:, 0], x_y_new[:, 1], color=color, label=legend)
     plt.scatter(mu[0], mu[1], color=color)
+    
+def plot_robot(state):
+    """
+    Plots a circle at the center of the robot and a line to depict the yaw.
+
+    :param state: (x, y, theta)
+    """
+
+    assert isinstance(state, np.ndarray)
+    assert state.shape == (3,)
+
+    radius = 0.01
+    robot = plt.Circle(state[:-1], radius, edgecolor='black', facecolor='cyan', alpha=0.25)
+    orientation_line = np.array([[state[0], state[0] + (np.cos(state[2]) * (1000*radius * 1.5))],
+                                 [state[1], state[1] + (np.sin(state[2]) * (1000*radius * 1.5))]])
+
+    plt.gcf().gca().add_artist(robot)
+    plt.plot(orientation_line[0], orientation_line[1], 'black')
