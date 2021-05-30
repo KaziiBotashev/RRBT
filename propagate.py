@@ -10,6 +10,7 @@ class DynamicModel:
         self.C = np.eye(3)
         self.K = np.array([[1,1,0],
                            [0,0,1]])*k
+        
     
     def B(self, state):
         return np.array([[self.dt*np.cos(state[2]), 0],
@@ -22,11 +23,15 @@ class DynamicModel:
         self.x_predicted = self.A@state+self.B(state)@action
         self.Sigma_predicted = self.A@Sigma_state@self.A.T+self.Q
         
-    def update(self, Lambda_prev):
-        self.z = np.random.multivariate_normal([0,0,0], self.R)
-        self.S = self.C@self.Sigma_predicted@self.C.T + self.R
+    def update(self, Lambda_prev,is_observable = False):
+        R = self.R.copy()
+        if (is_observable):
+            R *= 1e-4
+            #print("update + observable",R)
+        self.z = np.random.multivariate_normal([0,0,0], R)
+        self.S = self.C@self.Sigma_predicted@self.C.T + R
         self.L = self.Sigma_predicted@self.C.T@np.linalg.inv(self.S)
-        z = np.random.multivariate_normal([0,0,0], self.R)
+        z = np.random.multivariate_normal([0,0,0], R)
         self.x_updated = self.x_predicted + self.L@(z-self.C@self.x_predicted)
         self.Sigma_updated = self.Sigma_predicted - self.L@self.C@self.Sigma_predicted
         term = self.A-self.B(self.state)@self.K
