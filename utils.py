@@ -1,8 +1,9 @@
 import numpy as np
 import cv2
 from typing import Union, Tuple
+from scipy.linalg import cholesky
 
-def uncertainty_collision_check(mu, Sigma, color='k', nSigma=1, legend=None):
+def get_cov_ellipse(mu, Sigma, color='k', nSigma=1, n_points = 10,legend=None):
     """
     Plots a 2D covariance ellipse given the Gaussian distribution parameters.
     The function expects the mean and covariance matrix to ignore the theta parameter.
@@ -12,14 +13,11 @@ def uncertainty_collision_check(mu, Sigma, color='k', nSigma=1, legend=None):
     :param color: The border color of the ellipse and of the major and minor axes.
     :param nSigma: The radius of the ellipse in terms of the number of standard deviations (default: 1).
     :param legend: If not None, a legend label to the ellipse will be added to the plot as an attribute.
-    returns True is passed
     """
     mu = np.array(mu)
     assert mu.shape == (2,)
     Sigma = np.array(Sigma)
     assert Sigma.shape == (2, 2)
-
-    n_points = 50
 
     A = cholesky(Sigma, lower=True)
 
@@ -29,27 +27,12 @@ def uncertainty_collision_check(mu, Sigma, color='k', nSigma=1, legend=None):
 
     x_y_old = np.stack((x_old, y_old), 1)
     x_y_new = np.matmul(x_y_old, np.transpose(A)) + mu.reshape(1, 2) # (A*x)T = xT * AT
-    for xy in x_y_new:
-        if (is_point_in_collision(env,xy,7)):
-            return False
     
-    return True
-
-def trim_zeros(array):
-    for axis in [0, 1]:
-        mask = ~(array == 0).all(axis=axis)
-        inv_mask = mask[::-1]
-        start_idx = np.argmax(mask == True)
-        end_idx = len(inv_mask) - np.argmax(inv_mask == True)
-        if axis:
-            array = array[start_idx:end_idx, :]
-        else:
-            array = array[:, start_idx:end_idx]
-            
-    return array
+    return x_y_new #x_y_new[:, 0], x_y_new[:, 1]
 
 def is_state_observable(env,state, obs_val):
-    if(env[state] == obs_val): 
+#     if(env[state] == obs_val):
+    if(state[0]> 200): 
         return True
     else: 
         return False
@@ -89,18 +72,73 @@ def rotate_image(image: np.array, angle: Union[int, float]):
     result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
     return result
 
+def angle_difference(from_ang, to):
+    delta_angle =  to - from_ang
+    delta_angle = (delta_angle + np.pi) % (2 * np.pi) - np.pi
+    return delta_angle
 
-def angle_difference(angle1: Union[int, float], angle2: Union[int, float]) -> Union[int, float]:
+def get_distance(state_1,state_2, dis_weight = 1,ang_weight = 20):
+    d_xy = np.linalg.norm(state_1[:2] - state_2[:2])
+    d_theta = np.abs(angle_difference(state_1[2],state_2[2]))
+
+    return dis_weight * d_xy + ang_weight * d_theta
+
+    
+def find_nearest(graph, random_point):
+        min_distance = 1e7
+        min_index = None
+        
+        for index, vert in enumerate(graph.nodes):
+            vert = np.array(graph.nodes[vert]['val'])
+            distance = get_distance(random_point, vert)
+            if distance <= min_distance:
+                min_distance = distance
+                min_index = index
+        
+        return min_index
+
+def is_state_collision_free(env,mu, Sigma, nSigma = 1,n_points = 10):
     """
-    angle1: first angle in degrees
-    angle2: second angle in degrees
-    return: diff between angles (from 0 to 180)
+    Checks collison of the ellipse with given the Gaussian distribution parameters.
     """
-    delta_angle = angle1 - angle2
-    delta_angle = (delta_angle + 180) % 360 - 180
-    return abs(delta_angle)
+    x_y_new = get_cov_ellipse(mu[:2],Sigma[:2,:2],n_points = n_points)
+    for xy in x_y_new:
+        check_state = tuple(xy.astype(int))
+        if(check_state[0] < 0): return False
+        if(check_state[0] > env.shape[0]-1): return False
+        if(check_state[1] < 0): return False
+        if(check_state[1] > env.shape[1]-1): return False
+        if (is_point_in_collision(env,check_state,7)):
+            return False
+    
+    return True
+    
+def steer_func(near_state, final_state,max_xy_step = 20.0, max_angle_step = np.pi/6):
+    dir_xy = final_state[:2] - near_state[:2]
+    angle = angle_difference(near_state[2],final_state[2])
+    new_state = near_state.copy()
+    if (np.linalg.norm(dir_xy) < max_xy_step):
+        new_state[:2] = final_state[:2]
+    else: 
+        new_state[:2] += dir_xy * (max_xy_step / np.linalg.norm(dir_xy))
+    
+    if (np.abs(angle) < max_angle_step):
+        new_state[2] += angle
+    else: 
+        new_state[2] += np.copysign(max_angle_step,angle)
+    return new_state
 
+def sample_state(x_rng, y_rng,theta_rng, x_dims,y_dims, goal_state = None):
 
+    key = np.random.rand(1)    
+    if (goal_state is not None and key >0.9):
+        return goal_state
+    else:
+        x = x_rng.integers(low = x_dims[0], high = x_dims[1])
+        y = y_rng.integers(low = y_dims[0], high = y_dims[1])
+        theta =  2*np.pi * theta_rng.random() - np.pi
+        return np.array([x,y,theta])
+    
 def generate_cropped_images(env: np.array, obj: np.array, pose: np.array):
     """
     @param env: array representing environment
@@ -264,4 +302,18 @@ def plotting_results(environment,obj,plan, weight=20, step=75):
 
     plt.show()
 
+
+
+def trim_zeros(array):
+    for axis in [0, 1]:
+        mask = ~(array == 0).all(axis=axis)
+        inv_mask = mask[::-1]
+        start_idx = np.argmax(mask == True)
+        end_idx = len(inv_mask) - np.argmax(inv_mask == True)
+        if axis:
+            array = array[start_idx:end_idx, :]
+        else:
+            array = array[:, start_idx:end_idx]
+            
+    return array
 

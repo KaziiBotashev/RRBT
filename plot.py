@@ -1,51 +1,71 @@
-from scipy.linalg import cholesky
 import matplotlib.pyplot as plt
 import numpy as np
+from utils import get_cov_ellipse
 
 def plot2dcov(mu, Sigma, color='k', nSigma=1, legend=None):
-    """
-    Plots a 2D covariance ellipse given the Gaussian distribution parameters.
-    The function expects the mean and covariance matrix to ignore the theta parameter.
-
-    :param mu: The mean of the distribution: 2x1 vector.
-    :param Sigma: The covariance of the distribution: 2x2 matrix.
-    :param color: The border color of the ellipse and of the major and minor axes.
-    :param nSigma: The radius of the ellipse in terms of the number of standard deviations (default: 1).
-    :param legend: If not None, a legend label to the ellipse will be added to the plot as an attribute.
-    """
-    mu = np.array(mu)
-    assert mu.shape == (2,)
-    Sigma = np.array(Sigma)
-    assert Sigma.shape == (2, 2)
-
-    n_points = 50
-
-    A = cholesky(Sigma, lower=True)
-
-    angles = np.linspace(0, 2 * np.pi, n_points)
-    x_old = nSigma * np.cos(angles)
-    y_old = nSigma * np.sin(angles)
-
-    x_y_old = np.stack((x_old, y_old), 1)
-    x_y_new = np.matmul(x_y_old, np.transpose(A)) + mu.reshape(1, 2) # (A*x)T = xT * AT
-
+    x_y_new = get_cov_ellipse(mu, Sigma[:2,:2])
+    
     plt.plot(x_y_new[:, 0], x_y_new[:, 1], color=color, label=legend)
     plt.scatter(mu[0], mu[1], color=color)
     
-def plot_robot(state):
-    """
-    Plots a circle at the center of the robot and a line to depict the yaw.
 
-    :param state: (x, y, theta)
-    """
+    
+def plot_point_on_env(env,x = 150,y = 160):
+    plt.figure(figsize=(10, 8))
+    plt.scatter(y, x, linewidth=1, color='red')
+    plt.imshow(env)
 
-    assert isinstance(state, np.ndarray)
-    assert state.shape == (3,)
+def path_plot(env,plan,nodes, ellipse_step = 1,graph  = None):
+    plt.figure(figsize=(12, 8))
 
-    radius = 0.01
-    robot = plt.Circle(state[:-1], radius, edgecolor='black', facecolor='cyan', alpha=0.25)
-    orientation_line = np.array([[state[0], state[0] + (np.cos(state[2]) * (1000*radius * 1.5))],
-                                 [state[1], state[1] + (np.sin(state[2]) * (1000*radius * 1.5))]])
+    xaxis = [x[1] for x in plan]
+    yaxis = [x[0] for x in plan]
+    
+    if (graph is not None):
+        for node in graph.nodes:
+            x, y, angle = graph.nodes[node]['val']
+            plt.scatter(y,x, linewidth =0.01, color='white')
 
-    plt.gcf().gca().add_artist(robot)
-    plt.plot(orientation_line[0], orientation_line[1], 'black')
+    for i in range(len(plan)):
+        if not i % ellipse_step:
+            mu = np.array([xaxis[i], yaxis[i]])
+
+            matrix = nodes[i].Sigma[:2,:2]
+            xy_ellipse = get_cov_ellipse(mu, matrix)
+            plt.plot(xy_ellipse[:,0], xy_ellipse[:,1], linewidth=2, color='magenta')
+
+    plt.plot(xaxis, yaxis, color='blue', linewidth=2)
+    plt.scatter(xaxis[0],yaxis[0],  linewidth=3, color='orange')
+    plt.scatter(xaxis[-1], yaxis[-1],linewidth=3, color='red')
+    
+    plt.imshow(env)
+
+    plt.axis('off')
+    plt.show()
+    
+def plot_all_graph_ellipses(env,graph, additional_points = []):
+    plt.figure(figsize=(10, 8))
+
+    for node in graph.nodes:
+        x, y, angle = graph.nodes[node]['val']
+        belief_nodes = graph.nodes[node]['belief_nodes']
+        
+        plt.scatter(y, x, linewidth=1, color='white')
+        x_y_new = get_cov_ellipse((y,x), belief_nodes[0].Sigma[:2,:2])
+        plt.plot(x_y_new[:, 0], x_y_new[:, 1])
+        
+    for point in additional_points:
+        plt.scatter(point[1], point[0], linewidth=1, color='red')
+    plt.imshow(env)
+    plt.axis('off')
+    plt.show()
+    
+def plot_all_graph_points(env,graph, additional_points = []):
+    plt.figure(figsize=(10, 8))
+
+    for node in graph.nodes:
+        x, y, angle = graph.nodes[node]['val']
+        plt.scatter(y, x, linewidth=1, color='white')
+    for point in additional_points:
+        plt.scatter(point[1], point[0], linewidth=1, color='red')
+    plt.imshow(env)
