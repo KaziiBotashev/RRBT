@@ -5,7 +5,7 @@ from utils import *
 import networkx as nx
 
 def test_path_vizualization(env):    
-    test_plan = [[20,20,0], [100,50,0],[160,120,0]]
+    test_plan = [[30,10,0], [100,50,0],[160,120,0]]
     test_cov_matrices = [BeliefNode(np.eye(2)*100,np.zeros((3,3)), 0),BeliefNode(np.eye(2)*500,np.zeros((3,3)),0),
                         BeliefNode(np.eye(2)*50,np.zeros((3,3)),0)]
     
