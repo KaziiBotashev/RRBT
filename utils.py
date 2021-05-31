@@ -14,6 +14,7 @@ def get_cov_ellipse(mu, Sigma, color='k', nSigma=1, n_points = 10,legend=None):
     :param nSigma: The radius of the ellipse in terms of the number of standard deviations (default: 1).
     :param legend: If not None, a legend label to the ellipse will be added to the plot as an attribute.
     """
+    # print("get_cov_ellipse n_points",n_points,"nSigma",nSigma)
     mu = np.array(mu)
     assert mu.shape == (2,)
     Sigma = np.array(Sigma)
@@ -30,9 +31,35 @@ def get_cov_ellipse(mu, Sigma, color='k', nSigma=1, n_points = 10,legend=None):
     
     return x_y_new #x_y_new[:, 0], x_y_new[:, 1]
 
+
+def is_state_collision_free(env,mu, Sigma,n_points = 10, nSigma = 1,):
+    """
+    Checks collison of the ellipse with given the Gaussian distribution parameters.
+    """
+    # print("is_state_col n_points",n_points,"nSigma",nSigma)
+    
+    x_y_new = get_cov_ellipse(mu[:2],Sigma[:2,:2], n_points = n_points)
+    for xy in x_y_new:
+        check_state = tuple(xy.astype(int))
+        if(check_state[0] < 0): return False
+        if(check_state[0] > env.shape[0]-1): return False
+        if(check_state[1] < 0): return False
+        if(check_state[1] > env.shape[1]-1): return False
+        if (is_point_in_collision(env,check_state,7)):
+            return False
+    
+    return True
+    
+def path_length(states):
+    length = 0
+    for it in range (len(states)-1):
+        length += np.linalg.norm(states[it+1] - states[it])
+
+    return length
+
 def is_state_observable(env,state, obs_val):
 #     if(env[state] == obs_val):
-    if(state[0]> 200): 
+    if(state[0]> 230): 
         return True
     else: 
         return False
@@ -97,22 +124,6 @@ def find_nearest(graph, random_point):
         
         return min_index
 
-def is_state_collision_free(env,mu, Sigma, nSigma = 1,n_points = 10):
-    """
-    Checks collison of the ellipse with given the Gaussian distribution parameters.
-    """
-    x_y_new = get_cov_ellipse(mu[:2],Sigma[:2,:2],n_points = n_points)
-    for xy in x_y_new:
-        check_state = tuple(xy.astype(int))
-        if(check_state[0] < 0): return False
-        if(check_state[0] > env.shape[0]-1): return False
-        if(check_state[1] < 0): return False
-        if(check_state[1] > env.shape[1]-1): return False
-        if (is_point_in_collision(env,check_state,7)):
-            return False
-    
-    return True
-    
 def steer_func(near_state, final_state,max_xy_step = 20.0, max_angle_step = np.pi/6):
     dir_xy = final_state[:2] - near_state[:2]
     angle = angle_difference(near_state[2],final_state[2])
