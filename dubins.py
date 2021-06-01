@@ -1,271 +1,557 @@
-import math
-from copy import deepcopy
 import numpy as np
-import matplotlib.pyplot as plt
 
-def draw_point(point, arrow_length=0.5):
-    plt.plot(point[0], point[1], 'o')
-    plt.arrow(point[0], point[1], arrow_length * math.cos(point[2]), arrow_length * math.sin(point[2]), head_width=0.05)
+def ortho(vect2d):
+    """Computes an orthogonal vector to the one given"""
+    return np.array((-vect2d[1], vect2d[0]))
+
+def dist(pt_a, pt_b):
+    """Euclidian distance between two (x, y) points"""
+    return ((pt_a[0]-pt_b[0])**2 + (pt_a[1]-pt_b[1])**2)**.5
+
+class Dubins:
+    """
+    Class implementing a Dubins path planner with a constant turn radius.
     
-def flatten_list(list_):
-    merged_list = []
-    for sublist in list_:
-        for item in sublist:
-            merged_list.append(item)
-    return np.array(merged_list)
+    Attributes
+    ----------
+    radius : float
+        The radius of the turn used in all the potential trajectories.
+    point_separation : float
+        The distance between points of the trajectories. More points increases
+        the precision of the path but also augments the computation time of the
+        colision check.
 
-class DubinsPath(object):
-    def __init__(self, start, end, r=1.0):
-        self._s = start
-        self._e = end
-        self._r = r
-        self._paths = []
+    Methods
+    -------
+    dubins_path
+        Computes the shortest dubins path between two given points.
+    generate_points_straight
+        Turns a path into a set of point representing the trajectory, for
+        dubins paths when the path is one of LSL, LSR, RSL, RSR.
+    generate_points_curve
+        Turns a path into a set of point representing the trajectory, for
+        dubins paths when the path is one of RLR or LRL.
+    find_center
+        Compute the center of the circle described by a turn.
+    lsl
+        Dubins path with a left straight left trajectory.
+    rsr
+        Dubins path with a right straight right trajectory.
+    rsl
+        Dubins path with a right straight left trajectory.
+    lsr
+        Dubins path with a left straight right trajectory.
+    lrl
+        Dubins path with a left right left trajectory.
+    rlr
+        Dubins path with a right left right trajectory.
+    """
+    def __init__(self, radius, point_separation):
+        assert radius > 0 and point_separation > 0
+        self.radius = radius
+        self.point_separation = point_separation
 
-    def calc_paths(self):
-        le = self.calc_end()
-        types = [self.calc_lsl_from_origin,
-                 self.calc_rsr_from_origin,
-                 self.calc_lsr_from_origin,
-                 self.calc_rsl_from_origin,
-                 self.calc_rlr_from_origin,
-                 self.calc_lrl_from_origin]
-        for t in types:
-            path = t(le)
-            if path:
-                self._paths.append(path)
-        return self._paths
+    def all_options(self, start, end, sort=False):
+        """
+        Computes all the possible Dubin's path and returns them, in the form
+        of a list of tuples representing each option: (path_length,
+        dubins_path, straight).
 
-    def get_shortest_path(self):
-        shortest_cost = float("inf")
-        shortest_path = []
-        for path in self._paths:
-            cost = 0
-            for p in path:
-                cost += p[1] if p[0] == 's' else p[1] * self._r
-            if cost < shortest_cost:
-                shortest_path = path
-                shortest_cost = cost
-        return deepcopy(shortest_path), shortest_cost
+        Parameters
+        ----------
+        start :  tuple
+            In the form (x, y, psi), with psi in radians.
+            The representation of the inital point.
+        end : tuple
+            In the form (x, y, psi), with psi in radians.
+            The representation of the final point.
+        sort : bool
+            If the list of option has to be sorted by decreasing cost or not.
 
-    def calc_end(self):
-        ex = self._e[0] - self._s[0]
-        ey = self._e[1] - self._s[1]
+        Returns
+        -------
+        The shortest list of points (x, y) linking the initial and final points
+        given as input with only turns of a defined radius and straight line.
 
-        lex = math.cos(self._s[2]) * ex + math.sin(self._s[2]) * ey
-        ley = - math.sin(self._s[2]) * ex + math.cos(self._s[2]) * ey
-        leyaw = self._e[2] - self._s[2]
-        lex = lex / self._r
-        ley = ley / self._r
-        return [lex, ley, leyaw]
+        """
+        center_0_left = self.find_center(start, 'L')
+        center_0_right = self.find_center(start, 'R')
+        center_2_left = self.find_center(end, 'L')
+        center_2_right = self.find_center(end, 'R')
+        options = [self.lsl(start, end, center_0_left, center_2_left),
+                   self.rsr(start, end, center_0_right, center_2_right),
+                   self.rsl(start, end, center_0_right, center_2_left),
+                   self.lsr(start, end, center_0_left, center_2_right),
+                   self.rlr(start, end, center_0_right, center_2_right),
+                   self.lrl(start, end, center_0_left, center_2_left)]
+        if sort:
+            options.sort(key=lambda x: x[0])
+        return options
 
-    def mod2pi(self, theta):
-        return theta - 2.0 * math.pi * math.floor(theta / 2.0 / math.pi)
+    def dubins_path(self, start, end):
+        """
+        Computes all the possible Dubin's path and returns the sequence of
+        points representing the shortest option.
 
-    def calc_lsl_from_origin(self, e):
-        x_ = e[0] - math.sin(e[2])
-        y_ = e[1] - 1 + math.cos(e[2])
+        Parameters
+        ----------
+        start :  tuple
+            In the form (x, y, psi), with psi in radians.
+            The representation of the inital point.
+        end : tuple
+            In the form (x, y, psi), with psi in radians.
+            The representation of the final point.
 
-        u = math.sqrt((x_) ** 2 + (y_) ** 2)
-        t = self.mod2pi(math.atan2(y_ , x_))
-        v = self.mod2pi(e[2] - t)
-        return [['l', t], ['s', u * self._r], ['l', v]]
+        Returns
+        -------
+        The shortest list of points (x, y) linking the initial and final points
+        given as input with only turns of a defined radius and straight line.
+        In the form of a (2xn) numpy array.
 
-    def calc_rsr_from_origin(self, e):
-        e_ = deepcopy(e)
-        e_[1] = -e_[1]
-        e_[2] = self.mod2pi(-e_[2])
+        """
+        options = self.all_options(start, end)
+        dubins_path, straight = min(options, key=lambda x: x[0])[1:]
+        return self.generate_points(start, end, dubins_path, straight)
 
-        path = self.calc_lsl_from_origin(e_)
-        path[0][0] = 'r'
-        path[2][0] = 'r'
-        return path
+    def generate_points(self, start, end, dubins_path, straight):
+        """
+        Transforms the dubins path in a succession of points in the 2D plane.
 
-    def calc_lsr_from_origin(self, e):
-        x_ = e[0] + math.sin(e[2])
-        y_ = e[1] - 1 - math.cos(e[2])
-        u1_square = x_ ** 2 + y_ ** 2
-        if u1_square < 4:
-            return []
-        t1 = self.mod2pi(math.atan2(y_, x_))
-        u = math.sqrt(u1_square - 4)
-        try:
-            theta = self.mod2pi(math.atan(2 / u))
-        except:
-            u += 1e-6
-            theta = self.mod2pi(math.atan(2 / u))
-        t = self.mod2pi(t1 + theta)
-        v = self.mod2pi(t - e[2])
-        return [['l', t], ['s', u * self._r], ['r', v]]
+        Parameters
+        ----------
+        start: tuple
+            In the form (x, y, psi), with psi in radians.
+            The representation of the inital point.
+        end: tuple
+            In the form (x, y, psi), with psi in radians.
+            The representation of the final point.
+        dubins_path: tuple
+            The representation of the dubins path in the form of a tuple
+            containing:
+                - the angle of the turn in the first circle, in rads.
+                - the angle of the turn in the last circle, in rads.
+                - the angle of the turn in the central circle, in rads, or the
+                  length of the central segment if straight is true.
+        straight: bool
+            True if their is a central segment in the dubins path.
 
-    def calc_rsl_from_origin(self, e):
-        e_ = deepcopy(e)
-        e_[1] = -e_[1]
-        e_[2] = self.mod2pi(-e_[2])
+        Returns
+        -------
+        The shortest list of points (x, y) linking the initial and final points
+        given as input with only turns of a defined radius and straight line.
+        In the form of a (2xn) numpy array.
 
-        path = self.calc_lsr_from_origin(e_)
-        if path:
-            path[0][0] = 'r'
-            path[2][0] = 'l'
-            return path
-        else:
-            return []
+        """
+        if straight:
+            return self.generate_points_straight(start, end, dubins_path)
+        return self.generate_points_curve(start, end, dubins_path)
 
-    def calc_lrl_from_origin(self, e):
-        x_ = e[0] - math.sin(e[2])
-        y_ = e[1] - 1 + math.cos(e[2])
-        u1 = math.sqrt(x_ ** 2 + y_ ** 2)
-        if u1 > 4:
-            return []
-        t1 = math.atan2(y_, x_)
-        theta = math.acos(u1 / 4)
-        t = self.mod2pi(math.pi / 2 + t1 + theta)
-        u = self.mod2pi(math.pi + 2 * theta)
-        v = self.mod2pi(math.pi / 2 - t1 + theta + e[2])
-        return [['l', t], ['r', u], ['l', v]]
+    def lsl(self, start, end, center_0, center_2):
+        """
+        Left-Straight-Left trajectories.
+        First computes the poisition of the centers of the turns, and then uses
+        the fact that the vector defined by the distance between the centers
+        gives the direction and distance of the straight segment.
 
-    def calc_rlr_from_origin(self, e):
-        e_ = deepcopy(e)
-        e_[1] = -e_[1]
-        e_[2] = self.mod2pi(-e_[2])
+        .. image:: img/twoturnssame.svg
 
-        path = self.calc_lrl_from_origin(e_)
-        if path:
-            path[0][0] = 'r'
-            path[1][0] = 'l'
-            path[2][0] = 'r'
-            return path
-        else:
-            return []
+        Parameters
+        ----------
+        start : tuple
+            (x, y, psi) coordinates of the inital point.
+        end : tuple
+            (x, y, psi) coordinates of the final point.
+        center_0 : tuple
+            (x, y) coordinates of the center of the first turn.
+        center_2 : tuple
+            (x, y) coordinates of the center of the last turn.
 
-    @classmethod
-    def gen_path(cls, s, path, r, dt, section=True):
-        def wrap_angle(angle):
-            """
-            Wraps the given angle to the range [-pi, +pi].
+        Returns
+        -------
+        total_len : float
+            The total distance of this path.
+        (beta_0, beta_2, straight_dist) : tuple
+            The dubins path, i.e. the angle of the first turn, the angle of the
+            last turn, and the length of the straight segment.
+        straight : bool
+            True, to indicate that this path contains a straight segment.
+        """
+        straight_dist = dist(center_0, center_2)
+        alpha = np.arctan2((center_2-center_0)[1], (center_2-center_0)[0])
+        beta_2 = (end[2]-alpha)%(2*np.pi)
+        beta_0 = (alpha-start[2])%(2*np.pi)
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (beta_0, beta_2, straight_dist), True)
 
-            :param angle: The angle (in rad) to wrap (can be unbounded).
-            :return: The wrapped angle (guaranteed to in [-pi, +pi]).
-            """
-
-            pi2 = 2 * np.pi
-
-            while angle < -np.pi:
-                angle += pi2
-
-            while angle >= np.pi:
-                angle -= pi2
-
-            return angle
+    def rsr(self, start, end, center_0, center_2):
+        """
+        Right-Straight-Right trajectories.
+        First computes the poisition of the centers of the turns, and then uses
+        the fact that the vector defined by the distance between the centers
+        gives the direction and distance of the straight segment.
         
-        def calc_TurnCenter(point, dir='l', r=1.0):
-            if dir == 'l':
-                ang = point[2] + math.pi / 2
-            elif dir == 'r':
-                ang = point[2] - math.pi / 2
-            else:
-                return None
-            x = point[0] + math.cos(ang) * r
-            y = point[1] + math.sin(ang) * r
-            return (x, y)
-        r_x = []
-        r_y = []
-        ps_x = []
-        ps_y = []
-        start = s
-        yaw = s[2]
-        thetas = []
-        V = []
-        omegas = []
-        for p in path:
-            if p[0] == 's':
-                for l in np.arange(0, p[1], dt):
-                    ps_x.append(start[0] + math.cos(yaw) * l)
-                    ps_y.append(start[1] + math.sin(yaw) * l)
-                    V.append(1)
-                    omegas.append(0)
-                V.append(1)
-                omegas.append(0)   
-                ps_x.append(start[0] + math.cos(yaw) * p[1])
-                ps_y.append(start[1] + math.sin(yaw) * p[1])
-                if section:
-                    r_x.append(ps_x)
-                    r_y.append(ps_y)
-                else:
-                    r_x += ps_x
-                    r_y += ps_y
-            else:
-                center = calc_TurnCenter(start, p[0], r)
-                ang_start = math.atan2(start[1] - center[1], start[0] - center[0])
-                ang_end = ang_start + p[1] if p[0] == 'l' else ang_start - p[1]
-                if p[0] == 'l':
-                    step = dt / r
-                else:
-                    step = -dt / r
-                for ang in np.arange(ang_start, ang_end, step):
-                    ps_x.append(center[0] + math.cos(ang) * r)
-                    ps_y.append(center[1] + math.sin(ang) * r)
-                    V.append(1)
-                    omegas.append(np.sign(step)*1)                    
-                V.append(1)
-                omegas.append(1*np.sign(step))   
-                ps_x.append(center[0] + math.cos(ang_end) * r)
-                ps_y.append(center[1] + math.sin(ang_end) * r)
-                if section:
-                    r_x.append(ps_x)
-                    r_y.append(ps_y)
-                else:
-                    r_x += ps_x
-                    r_y += ps_y
-                yaw = start[2] + p[1] if p[0] == 'l' else start[2] - p[1]
-            start = (ps_x[-1], ps_y[-1], yaw)
-            ps_x = []
-            ps_y = []
-        return r_x, r_y, V, omegas
-    
-def connect(start, end, radius = 1.5, dt = 0.1, plot = False):
-    
-    def B_matrix(theta, dt):
-        return np.array([[dt*np.cos(theta), 0],
-                         [dt*np.sin(theta), 0],
-                         [0,               dt]])
-    
-    dubins = DubinsPath(start, end, radius)
-#     print(start, end)
-    dubins.calc_paths()
-    path, _ = dubins.get_shortest_path()
-    xs, ys, V, omegas = DubinsPath.gen_path(start, path, radius, dt)
-    if plot:
-        plt.figure()
-        draw_point(start)
-        draw_point(end)
-        for i in range(3):
-            plt.scatter(xs[i], ys[i])
-        plt.axis("equal")
-    del xs[0][-1]
-    del xs[1][-1]
-    del ys[0][-1]
-    del ys[1][-1]
-    v = []
-    w = []
-    for x, path_type in zip(xs, path):
-        if path_type[0] == 's':
-            for item in x:
-                v.append(1)
-                w.append(0)
-        elif path_type[0] == 'r':
-            for item in x:
-                v.append(1)
-                w.append(-1/radius)
-        elif path_type[0] == 'l':
-            for item in x:
-                v.append(1)
-                w.append(1/radius)
-    Vs = np.array([v,w]).T
-    result =[np.array(start)]
-    for vel in Vs:
-        result.append(result[-1]+B_matrix(result[-1][2], dt)@vel)
-    result = np.array(result)
-    if plot:
-        plt.plot(result[:,0], result[:,1])
-        plt.show()
-    return result, Vs
+        .. image:: img/twoturnssame.svg
+
+        Parameters
+        ----------
+        start : tuple
+            (x, y, psi) coordinates of the inital point.
+        end : tuple
+            (x, y, psi) coordinates of the final point.
+        center_0 : tuple
+            (x, y) coordinates of the center of the first turn.
+        center_2 : tuple
+            (x, y) coordinates of the center of the last turn.
+
+        Returns
+        -------
+        total_len : float
+            The total distance of this path.
+        (beta_0, beta_2, straight_dist) : tuple
+            The dubins path, i.e. the angle of the first turn, the angle of the
+            last turn, and the length of the straight segment.
+        straight : bool
+            True, to indicate that this path contains a straight segment.
+
+        """
+        straight_dist = dist(center_0, center_2)
+        alpha = np.arctan2((center_2-center_0)[1], (center_2-center_0)[0])
+        beta_2 = (-end[2]+alpha)%(2*np.pi)
+        beta_0 = (-alpha+start[2])%(2*np.pi)
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (-beta_0, -beta_2, straight_dist), True)
+
+    def rsl(self, start, end, center_0, center_2):
+        """
+        Right-Straight-Left trajectories.
+        Because of the change in turn direction, it is a little more complex to
+        compute than in the RSR or LSL cases. First computes the position of
+        the centers of the turns, and then uses the rectangle triangle defined
+        by the point between the two circles, the center point of one circle
+        and the tangeancy point of this circle to compute the straight segment
+        distance.
+
+        .. image:: img/twoturnsopposite.svg
+
+        Parameters
+        ----------
+        start : tuple
+            (x, y, psi) coordinates of the inital point.
+        end : tuple
+            (x, y, psi) coordinates of the final point.
+        center_0 : tuple
+            (x, y) coordinates of the center of the first turn.
+        center_2 : tuple
+            (x, y) coordinates of the center of the last turn.
+
+        Returns
+        -------
+        total_len : float
+            The total distance of this path.
+        (beta_0, beta_2, straight_dist) : tuple
+            The dubins path, i.e. the angle of the first turn, the angle of the
+            last turn, and the length of the straight segment.
+        straight : bool
+            True, to indicate that this path contains a straight segment.
+
+        """
+        median_point = (center_2 - center_0)/2
+        psia = np.arctan2(median_point[1], median_point[0])
+        half_intercenter = np.linalg.norm(median_point)
+        if half_intercenter < self.radius:
+            return (float('inf'), (0, 0, 0), True)
+        alpha = np.arccos(self.radius/half_intercenter)
+        beta_0 = -(psia+alpha-start[2]-np.pi/2)%(2*np.pi)
+        beta_2 = (np.pi+end[2]-np.pi/2-alpha-psia)%(2*np.pi)
+        straight_dist = 2*(half_intercenter**2-self.radius**2)**.5
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (-beta_0, beta_2, straight_dist), True)
+
+    def lsr(self, start, end, center_0, center_2):
+        """
+        Left-Straight-Right trajectories.
+        Because of the change in turn direction, it is a little more complex to
+        compute than in the RSR or LSL cases. First computes the poisition of
+        the centers of the turns, and then uses the rectangle triangle defined
+        by the point between the two circles, the center point of one circle
+        and the tangeancy point of this circle to compute the straight segment
+        distance.
+
+        .. image:: img/twoturnsopposite.svg
+        
+        Parameters
+        ----------
+        start : tuple
+            (x, y, psi) coordinates of the inital point.
+        end : tuple
+            (x, y, psi) coordinates of the final point.
+        center_0 : tuple
+            (x, y) coordinates of the center of the first turn.
+        center_2 : tuple
+            (x, y) coordinates of the center of the last turn.
+
+        Returns
+        -------
+        total_len : float
+            The total distance of this path.
+        (beta_0, beta_2, straight_dist) : tuple
+            The dubins path, i.e. the angle of the first turn, the angle of the
+            last turn, and the length of the straight segment.
+        straight : bool
+            True, to indicate that this path contains a straight segment.
+
+            """
+        median_point = (center_2 - center_0)/2
+        psia = np.arctan2(median_point[1], median_point[0])
+        half_intercenter = np.linalg.norm(median_point)
+        if half_intercenter < self.radius:
+            return (float('inf'), (0, 0, 0), True)
+        alpha = np.arccos(self.radius/half_intercenter)
+        beta_0 = (psia-alpha-start[2]+np.pi/2)%(2*np.pi)
+        beta_2 = (.5*np.pi-end[2]-alpha+psia)%(2*np.pi)
+        straight_dist = 2*(half_intercenter**2-self.radius**2)**.5
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (beta_0, -beta_2, straight_dist), True)
+
+    def lrl(self, start, end, center_0, center_2):
+        """
+        Left-right-Left trajectories.
+        Using the isocele triangle made by the centers of the three circles,
+        computes the required angles.
+
+        .. image:: img/threeturns.svg
+
+        Parameters
+        ----------
+        start : tuple
+            (x, y, psi) coordinates of the inital point.
+        end : tuple
+            (x, y, psi) coordinates of the final point.
+        center_0 : tuple
+            (x, y) coordinates of the center of the first turn.
+        center_2 : tuple
+            (x, y) coordinates of the center of the last turn.
+
+        Returns
+        -------
+        total_len : float
+            The total distance of this path.
+        (beta_0, beta_2, straight_dist) : tuple
+            The dubins path, i.e. the angle of the first turn, the angle of the
+            last turn, and the length of the straight segment.
+        straight : bool
+            False, to indicate that this path does not contain a straight part.
+        """
+        dist_intercenter = dist(center_0, center_2)
+        intercenter = (center_2 - center_0)/2
+        psia = np.arctan2(intercenter[1], intercenter[0])
+        if 2*self.radius < dist_intercenter > 4*self.radius:
+            return (float('inf'), (0, 0, 0), False)
+        gamma = 2*np.arcsin(dist_intercenter/(4*self.radius))
+        beta_0 = (psia-start[2]+np.pi/2+(np.pi-gamma)/2)%(2*np.pi)
+        beta_1 = (-psia+np.pi/2+end[2]+(np.pi-gamma)/2)%(2*np.pi)
+        total_len = (2*np.pi-gamma+abs(beta_0)+abs(beta_1))*self.radius
+        return (total_len,
+                (beta_0, beta_1, 2*np.pi-gamma),
+                False)
+
+    def rlr(self, start, end, center_0, center_2):
+        """
+        Right-left-right trajectories.
+        Using the isocele triangle made by the centers of the three circles,
+        computes the required angles.
+
+        .. image:: img/threeturns.svg
+
+        Parameters
+        ----------
+        start : tuple
+            (x, y, psi) coordinates of the inital point.
+        end : tuple
+            (x, y, psi) coordinates of the final point.
+        center_0 : tuple
+            (x, y) coordinates of the center of the first turn.
+        center_2 : tuple
+            (x, y) coordinates of the center of the last turn.
+
+        Returns
+        -------
+        total_len : float
+            The total distance of this path.
+        (beta_0, beta_2, straight_dist) : tuple
+            The dubins path, i.e. the angle of the first turn, the angle of the
+            last turn, and the length of the straight segment.
+        straight : bool
+            False, to indicate that this path does not contain a straight part.
+        """
+        dist_intercenter = dist(center_0, center_2)
+        intercenter = (center_2 - center_0)/2
+        psia = np.arctan2(intercenter[1], intercenter[0])
+        if 2*self.radius < dist_intercenter > 4*self.radius:
+            return (float('inf'), (0, 0, 0), False)
+        gamma = 2*np.arcsin(dist_intercenter/(4*self.radius))
+        beta_0 = -((-psia+(start[2]+np.pi/2)+(np.pi-gamma)/2)%(2*np.pi))
+        beta_1 = -((psia+np.pi/2-end[2]+(np.pi-gamma)/2)%(2*np.pi))
+        total_len = (2*np.pi-gamma+abs(beta_0)+abs(beta_1))*self.radius
+        return (total_len,
+                (beta_0, beta_1, 2*np.pi-gamma),
+                False)
+
+
+    def find_center(self, point, side):
+        """
+        Given an initial position, and the direction of the turn, computes the
+        center of the circle with turn radius self.radius passing by the intial
+        point.
+
+        Parameters
+        ----------
+        point : tuple
+            In the form (x, y, psi), with psi in radians.
+            The representation of the inital point.
+        side : Char
+            Either 'L' to indicate a left turn, or 'R' for a right turn.
+
+        Returns
+        -------
+        coordinates : 2x1 Array Like
+            Coordinates of the center of the circle describing the turn.
+
+        """
+        assert side in 'LR'
+        angle = point[2] + (np.pi/2 if side == 'L' else -np.pi/2)
+        return np.array((point[0] + np.cos(angle)*self.radius,
+                         point[1] + np.sin(angle)*self.radius))
+
+    def generate_points_straight(self, start, end, path):
+        """
+        For the 4 first classes of dubins paths, containing in the middle a
+        straight section.
+
+        Parameters
+        ----------
+        start : tuple
+            Start position in the form (x, y, psi).
+        end : tuple
+            End position in the form (x, y, psi).
+        path : tuple
+            The computed dubins path, a tuple containing:
+                - the angle of the turn in the first circle, in rads
+                - the angle of the turn in the last circle, in rads
+                - the length of the straight line in between
+            A negative angle means a right turn (antitrigonometric), and a
+            positive angle represents a left turn.
+
+        Returns
+        -------
+        The shortest list of points (x, y) linking the initial and final points
+        given as input with only turns of a defined radius and straight line.
+        In the form of a (2xn) numpy array.
+
+        """
+        total = self.radius*(abs(path[1])+abs(path[0]))+path[2] # Path length
+        center_0 = self.find_center(start, 'L' if path[0] > 0 else 'R')
+        center_2 = self.find_center(end, 'L' if path[1] > 0 else 'R')
+
+        # We first need to find the points where the straight segment starts
+        if abs(path[0]) > 0:
+            angle = start[2]+(abs(path[0])-np.pi/2)*np.sign(path[0])
+            ini = center_0+self.radius*np.array([np.cos(angle), np.sin(angle)])
+        else: ini = np.array(start[:2])
+        # We then identify its end
+        if abs(path[1]) > 0:
+            angle = end[2]+(-abs(path[1])-np.pi/2)*np.sign(path[1])
+            fin = center_2+self.radius*np.array([np.cos(angle), np.sin(angle)])
+        else: fin = np.array(end[:2])
+        dist_straight = dist(ini, fin)
+
+        # We can now generate all the points with the desired precision
+        points = []
+        for x in np.arange(0, total, self.point_separation):
+            if x < abs(path[0])*self.radius: # First turn
+                points.append(self.circle_arc(start, path[0], center_0, x))
+            elif x > total - abs(path[1])*self.radius: # Last turn
+                points.append(self.circle_arc(end, path[1], center_2, x-total))
+            else: # Straight segment
+                coeff = (x-abs(path[0])*self.radius)/dist_straight
+                points.append(coeff*fin + (1-coeff)*ini)
+        points.append(end[:2])
+        return np.array(points)
+
+    def generate_points_curve(self, start, end, path):
+        """
+        For the two last paths, where the trajectory is a succession of 3
+        turns. First computing the position of the center of the central turn,
+        then using the three circles to apply the angles given in the path
+        argument.
+
+        Parameters
+        ----------
+        start : tuple
+            Start position in the form (x, y, psi).
+        end : tuple
+            End position in the form (x, y, psi).
+        path : tuple
+            The computed dubins path, a tuple containing:
+                - the angle of the turn in the first circle, in rads
+                - the angle of the turn in the last circle, in rads
+                - the angle of the turn in the central circle, in rads
+            A negative angle means a right turn (antitrigonometric), and a
+            positive angle represents a left turn.
+
+        Returns
+        -------
+        The shortest list of points (x, y) linking the initial and final points
+        given as input with only turns of a defined radius. In the form of a
+        (2xn) numpy array.
+
+        """
+        total = self.radius*(abs(path[1])+abs(path[0])+abs(path[2]))
+        center_0 = self.find_center(start, 'L' if path[0] > 0 else 'R')
+        center_2 = self.find_center(end, 'L' if path[1] > 0 else 'R')
+        intercenter = dist(center_0, center_2)
+        center_1 = (center_0 + center_2)/2 +\
+                   np.sign(path[0])*ortho((center_2-center_0)/intercenter)\
+                    *(4*self.radius**2-(intercenter/2)**2)**.5
+        psi_0 = np.arctan2((center_1 - center_0)[1],
+                           (center_1 - center_0)[0])-np.pi
+
+        points = []
+        for x in np.arange(0, total, self.point_separation):
+            if x < abs(path[0])*self.radius: # First turn
+                points.append(self.circle_arc(start, path[0], center_0, x))
+            elif x > total - abs(path[1])*self.radius: # Last turn
+                points.append(self.circle_arc(end, path[1], center_2, x-total))
+            else: # Middle Turn
+                angle = psi_0-np.sign(path[0])*(x/self.radius-abs(path[0]))
+                vect = np.array([np.cos(angle), np.sin(angle)])
+                points.append(center_1+self.radius*vect)
+        points.append(end[:2])
+        return np.array(points)
+
+    def circle_arc(self, reference, beta, center, x):
+        """
+        Returns the point located on the circle of center center and radius
+        defined by the class, at the angle x.
+
+        Parameters
+        ----------
+        reference : float
+            Angular starting point, in radians.
+        beta : float
+            Used actually only to know the direction of the rotation, and hence
+            to know if the path needs to be added or substracted from the
+            reference angle.
+        center : tuple
+            (x, y) coordinates of the center of the circle from which we need a
+            point on the circumference.
+        x : float
+            The lenght of the path on the circle.
+
+        Returns
+        -------
+        The coordinates of the point on the circle, in the form of a tuple.
+        """
+        angle = reference[2]+((x/self.radius)-np.pi/2)*np.sign(beta)
+        vect = np.array([np.cos(angle), np.sin(angle)])
+        return center+self.radius*vect

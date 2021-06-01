@@ -13,7 +13,8 @@ def plot_point_on_env(env,x = 150,y = 160):
     plt.scatter(y, x, linewidth=1, color='red')
     plt.imshow(env)
 
-def path_plot(env,plan,nodes, ellipse_step = 1,ellipse_points = 30,graph  = None):
+def path_plot(env,plan,nodes, local_planner = None,name ='tests', ellipse_step = 1,ellipse_points = 30,graph  = None):
+    
     plt.figure(figsize=(12, 8))
 
     xaxis = [x[1] for x in plan]
@@ -24,14 +25,22 @@ def path_plot(env,plan,nodes, ellipse_step = 1,ellipse_points = 30,graph  = None
             x, y, angle = graph.nodes[node]['val']
             plt.scatter(y,x, linewidth =0.01, color='white')
 
-    for i in range(len(plan)):
+    for i in range(len(plan)-1):
+        if (local_planner is not None):
+            path = local_planner.dubins_path(plan[i], plan[i+1])
+            dt = int(len(path)/20)
+            it = 0
+            while (it < 20):
+                x, y = path[it*dt]
+                plt.scatter(y,x, linewidth =0.01, color='blue')
+                it +=1
+            
         if not i % ellipse_step:
             mu = np.array([xaxis[i], yaxis[i]])
-
             matrix = nodes[i].Sigma[:2,:2]
             xy_ellipse = get_cov_ellipse(mu, matrix, n_points = ellipse_points)
             plt.plot(xy_ellipse[:,0], xy_ellipse[:,1], linewidth=2, color='magenta')
-
+        
     plt.plot(xaxis, yaxis, color='blue', linewidth=2)
     plt.scatter(xaxis[0],yaxis[0],  linewidth=3, color='orange')
     plt.scatter(xaxis[-1], yaxis[-1],linewidth=3, color='red')
@@ -39,7 +48,8 @@ def path_plot(env,plan,nodes, ellipse_step = 1,ellipse_points = 30,graph  = None
     plt.imshow(env)
 
     plt.axis('off')
-    plt.show()
+    # plt.show()
+    plt.savefig(name, bbox_inches='tight', pad_inches=0)
     
 def plot_all_graph_ellipses(env,graph, ell_points = 10,additional_points = []):
     plt.figure(figsize=(10, 8))
@@ -66,3 +76,11 @@ def plot_all_graph_points(env,graph, additional_points = []):
     for point in additional_points:
         plt.scatter(point[1], point[0], linewidth=1, color='red')
     plt.imshow(env)
+
+def plot_dubins_path(env,path):
+    plt.figure(figsize=(12, 8))
+    for state in path:
+        x, y = state
+        plt.scatter(y,x, linewidth =0.01, color='red')
+    plt.imshow(env)
+    plt.show()
